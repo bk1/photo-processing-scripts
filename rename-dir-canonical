@@ -1,0 +1,67 @@
+#!/usr/bin/perl
+
+use strict;
+use File::Find ();
+
+# for the convenience of &wanted calls, including -eval statements:
+use vars qw/*name *dir *prune/;
+*name   = *File::Find::name;
+*dir    = *File::Find::dir;
+*prune  = *File::Find::prune;
+
+sub wanted;
+sub handle($$$);
+
+use Cwd ();
+my $cwd = Cwd::cwd();
+
+my @pairs = ();
+my %occupied = ();
+
+# Traverse desired filesystems
+File::Find::find({wanted => \&wanted}, $ENV{"PWD"});
+
+print "------------------------------------------------------------\n";
+
+foreach my $pair_ref (@pairs) {
+    my $name = $pair_ref->{'name'};
+    my $new_name = $pair_ref->{'new_name'};
+    print "do rename $name, $new_name\n";
+    rename $name, $new_name || print "rename failed\n";
+}
+
+sub wanted {
+    my ($dev, $ino, $mode, $nlink, $uid, $gid, $rdev, $size, $blksize, $blckcnt, $atime, $mtime, $ctime);
+    (! m/(RCS|\.thumbs)$/)
+        && (($dev, $ino, $mode, $nlink, $uid, $gid, $rdev, $size, $blksize, $blckcnt, $atime, $mtime, $ctime) = lstat($_))
+        && -d _ 
+        && -r _
+        && -x _
+        && handle($name, $ino, $size);
+}
+
+sub handle($$$) {
+    my ($name, $ino, $size) = @_;
+    # print "_=$_ name=$name ino=$ino size=$size\n";
+    if ($name =~ m/.thumbs/) {
+        print "no thumbs: $name\n";
+        return;
+    }
+    my $new_name = $name;
+    $new_name =~ s/[^\/a-zA-Z0-9_~.=+-]+/_/g;
+    if ($new_name ne $name) {
+        print "name=$name new_name=$new_name\n\n";
+        my $new_name_base = $new_name;
+        $new_name_base =~ s/$/-%04d/;
+        my $i = 0;
+        while ($occupied{$new_name} || -e $new_name) {
+            print "new name (name=$name new_name=$new_name) occupied: ";
+            $new_name = sprintf($new_name_base, $i++);
+            print "-> try new_name=$new_name\n";
+        }
+        print "will rename \"$name\" -> \"$new_name\"\n";
+        push @pairs,{'name'=>$name, 'new_name'=>$new_name};
+        @occupied{$new_name} = 1;
+    }
+}
+

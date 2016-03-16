@@ -1,0 +1,19 @@
+#!/usr/bin/perl
+
+opendir DIR, $ENV{PWD};
+my @dirs = sort grep { -d $_ } readdir(DIR);
+close DIR;
+
+open MAPPING, ">:utf8", "dir-mapping.dat";
+my $cnt = 0;
+foreach my $dir (@dirs) {
+    next if $dir =~ m/^[a-zA-Z_0-9.-]+$/;
+    print "dir=$dir\n";
+    my $ndir = sprintf("D%04d-%s", ++$cnt, $dir);
+    $ndir =~ s/[^a-zA-Z_0-9.-]+/_/g;
+    my $m = "$dir -> $ndir\n";
+    print $m;
+    print MAPPING $m;
+    rename $dir, $ndir;
+}
+close MAPPING;

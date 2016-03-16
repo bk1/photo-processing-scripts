@@ -1,0 +1,64 @@
+#!/usr/bin/perl
+
+use strict;
+use File::Find ();
+
+# for the convenience of &wanted calls, including -eval statements:
+use vars qw/*name *dir *prune/;
+*name   = *File::Find::name;
+*dir    = *File::Find::dir;
+*prune  = *File::Find::prune;
+
+sub wanted;
+sub handle($$$);
+
+use Cwd ();
+my $cwd = Cwd::cwd();
+
+# Traverse desired filesystems
+File::Find::find({wanted => \&wanted}, $ENV{"PWD"});
+
+sub wanted {
+    my ($dev, $ino, $mode, $nlink, $uid, $gid, $rdev, $size, $blksize, $blckcnt, $atime, $mtime, $ctime);
+    m/^.*\.(jpg|JPG|jpeg|JPEG|png|PNG|gif|GIF)$/
+        && (($dev, $ino, $mode, $nlink, $uid, $gid, $rdev, $size, $blksize, $blckcnt, $atime, $mtime, $ctime) = lstat($_))
+        && -f _ 
+        && -r _
+        && handle($name, $ino, $size);
+}
+
+sub handle($$$) {
+    my ($name, $ino, $size) = @_;
+    if ($name =~ m/.thumbs/) {
+        # print "no thumbs: $name\n";
+        return;
+    }
+    my $new_name = $name;
+    $new_name =~ s/\.(JPG|JPEG|PNG|GIF)$/.\L$1/;
+    $new_name =~ s/\.jpeg$/.jpg/;
+    $new_name =~ s/[^\/a-zA-Z0-9_~.=+-]+/_/g;
+    if ($new_name ne $name || length($new_name) < 12) {
+        $new_name =~ s/\.(jpg|gif|png)/-$size-$ino.$1/;
+    }
+    if ($new_name ne $name) {
+        my $new_name_base = $new_name;
+        $new_name_base =~ s/\.(jpg|gif|png)/-%04d.$1/;
+        my $i = 0;
+        while (-e $new_name) {
+            $new_name = sprintf($new_name_base, $i++);
+        }
+        print "rename $name -> $new_name\n";
+        rename $name, $new_name;
+        my $thumb_name = $name;
+        my $thumb_new_name = $new_name;
+        $thumb_name =~ s/(.+\/)(.+)/$1.thumbs\/$2/;
+        $thumb_new_name =~ s/(.+\/)(.+)/$1.thumbs\/$2/;
+        if (-e $thumb_name) {
+            print "rename $thumb_name -> $thumb_new_name\n";
+            rename $thumb_name, $thumb_new_name;
+        } else {
+            # print "no thumb $thumb_name\n";
+        }
+    }
+}
+
