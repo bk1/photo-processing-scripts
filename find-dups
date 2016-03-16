@@ -1,0 +1,134 @@
+#!/usr/bin/perl
+
+use strict;
+use File::Find ();
+
+# for the convenience of &wanted calls, including -eval statements:
+use vars qw/*name *dir *prune *verbose/;
+*name    = *File::Find::name;
+*dir     = *File::Find::dir;
+*prune   = *File::Find::prune;
+*verbose = *File::Find::verbose;
+
+$verbose = $ARGV[0] && $ARGV[0] =~ m/-+v(erbose)?/;
+
+sub wanted;
+sub handle($$$$);
+
+use Cwd ();
+my $cwd = Cwd::cwd();
+
+
+my %ino_count = ();
+my %ino_files = ();
+my %file_inos = ();
+
+my %size_count = ();
+my %size_inos = ();
+my %ino_sizes = ();
+
+# Traverse desired filesystems
+File::Find::find({wanted => \&wanted}, $ENV{"PWD"});
+
+my %md5_count = ();
+my %md5_files = ();
+
+
+foreach my $size (sort keys %size_count) {
+    if ($size_count{$size} > 1) {
+        my @inos_arr = sort keys %{$size_inos{$size}};
+        my $files_str = "";
+        foreach my $ino (@inos_arr) {
+            my $ino_files_ref = $ino_files{$ino};
+            my @files_arr = @{$ino_files_ref};
+            if (length($files_str) > 0) {
+                $files_str .= " ";
+            }
+            $files_str .= "$ino => [" . join(" ", @files_arr) . "]";
+            my $file = $files_arr[0];
+            my $sh_file = $file;
+            $sh_file =~ s/'/''/g;
+            my $key = $size . ":" . `md5sum < '$sh_file'`;
+            chomp $key;
+            $key =~ s/\s*-\s*$//;
+            $md5_count{$key} //= 0;
+            $md5_count{$key}++;
+            $md5_files{$key} //= [];
+            push @{$md5_files{$key}}, $ino_files_ref;
+        }
+        if ($verbose) {
+            printf("count=%2d size=%9d files=[%-s]\n", $size_count{$size}, $size, $files_str);
+        }
+    }
+}
+
+if ($verbose) {
+    print "------------------------------------------------------------\n\n";
+    print "------------------------------------------------------------\n";
+}
+
+foreach my $key (sort keys %md5_count) {
+    my $count = $md5_count{$key};
+    if ($count > 1) {
+        my @file_groups_arr = @{$md5_files{$key}};
+        my $ifiles_str = "";
+        my $afiles_str = "";
+        my @ifiles = ();
+        my $best_ifile = "";
+        foreach my $file_group (@file_groups_arr) {
+            my @file_group_arr = @{$file_group};
+            if (length($ifiles_str) > 0) {
+                $ifiles_str .= " ";
+            }
+            if (length($afiles_str) > 0) {
+                $afiles_str .= " ";
+            }
+            my $ifile = $file_group_arr[0];
+            $ifiles_str .= $ifile;
+            $afiles_str .= join(" ", @file_group_arr);
+            push @ifiles, $ifile;
+            if (length($best_ifile) < length($ifile) || $best_ifile ge $ifile) {
+                $best_ifile = $ifile;
+            }
+        }
+        printf("# count=%2d key=%30s\n# ifiles=[%-s]\n# afiles=[%-s]\n", $count, $key, $ifiles_str, $afiles_str);
+        for my $ifile (@ifiles) {
+            if ($ifile ne $best_ifile) {
+                print("rm -f $ifile\n");
+                print("ln -f $best_ifile $ifile\n");
+            }
+        }
+        print "\n";
+    }
+}
+
+
+exit;
+
+sub wanted {
+    my ($dev, $ino, $mode, $nlink, $uid, $gid, $rdev, $size, $blksize, $blckcnt, $atime, $mtime, $ctime);
+    m/^.*\.(jpg|JPG|png|PNG|gif|GIF|xcf|svg)$/
+        && (($dev, $ino, $mode, $nlink, $uid, $gid, $rdev, $size, $blksize, $blckcnt, $atime, $mtime, $ctime) = lstat($_))
+        && -f _ 
+        && -r _
+        && handle($name, $ino, $size, $_);
+}
+
+sub handle($$$$) {
+    my ($name, $ino, $size, $file) = @_;
+    if ($verbose) {
+        print "name=$name ino$ino size=$size, file=$file\n";
+    }
+    $ino_count{$ino} //= 0;
+    $ino_count{$ino}++;
+    $ino_files{$ino} //= [];
+    push @{$ino_files{$ino}}, $name;
+    $file_inos{$name} = $size;
+
+    $size_count{$size} //= 0;
+    $size_count{$size}++;
+    $size_inos{$size} //= {};
+    $size_inos{$size}->{$ino} = 1;
+    $ino_sizes{$ino} = $size;
+}
+
