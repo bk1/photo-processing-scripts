@@ -1,0 +1,25 @@
+#!/bin/bash
+
+mkdir -p .ori
+
+export ANGLE=$1
+CLOCK_ANGLE=`echo $ANGLE|perl -n -e 'print 360-$_;'`
+echo ANGLE=$ANGLE
+echo CLOCK_ANGLE=$CLOCK_ANGLE
+
+shift
+echo $*
+for i in $* ; do
+export SOURCE=$i
+TARGET=`echo $SOURCE|perl -p -e 's/\.jpg/-r.jpg/;'`
+echo SOURCE=$SOURCE
+echo TARGET=$TARGET
+
+convert $SOURCE -rotate $CLOCK_ANGLE $TARGET
+exiftool -Orientation=1 -n $TARGET
+mv $SOURCE .ori
+done
+
+
+create-foto-index
+find-unused-thumbs

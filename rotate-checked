@@ -1,0 +1,70 @@
+#!/usr/bin/perl
+
+my @files = ();
+my %files = ();
+
+my %ctrls = ( 'F' => 180, 'R' => 270, 'L' => 90 );
+
+open DATF, "<:utf8", "/var/lib/wwwrun/mark-fotos/marked.dat";
+while (my $line = <DATF>) {
+    chomp $line;
+    print "line=\"$line\"\n";
+    if (scalar(@ARGV) == 0) {
+        if ($line =~ m/TEXTS:/) {
+            last;
+        }
+    } else {
+        if ($line =~ m/CHECKED:/) {
+            last;
+        }
+    }
+}
+while (<DATF>) {
+    print;
+    if (scalar(@ARGV) > 0) {
+        if (m/^TEXTS:/) {
+            last;
+        }
+        if (m/^\S+\.(jpg|png|gif)/) {
+            $file = $_;
+            chomp $file;
+            $file =~ s@.+/@@;
+            print "file=$file\n";
+            push @files, $file;
+        }
+    } else {
+        if (m/^(?<FILE>\S+\.(jpg|png|gif))\s*:\s+(?<CTRL>\S+)/) {
+            $file = $+{FILE};
+            my $ctrl = $+{CTRL};
+            $files{$ctrl} //= "";
+            $files{$ctrl} .= " $file";
+        }
+    }
+}
+close DATF;
+
+if (scalar(@ARGV) > 0) {
+    my $angle = $ARGV[0];
+    my $files = join(" ", @files);
+    exec "rotate $angle $files";
+} else {
+    foreach my $ctrl (keys %files) {
+        print "ctrl='$ctrl'\n";
+        my $files_as_str = $files{$ctrl};
+        if ($ctrl eq 'D') {
+            system "chmod +rw $files_as_str";
+            system "revrm $files_as_str";
+        } else {
+            my $angle = $ctrls{$ctrl};
+            print "angle='$angle'\n";
+            print "rotate $angle $files_as_str\n";
+            system "rotate $angle $files_as_str";
+        }
+    }
+}
+
+
+system "mkdir -p .ori";
+system "mv *.jpg*ori* .ori";
+
+exec "create-foto-index";

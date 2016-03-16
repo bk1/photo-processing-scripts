@@ -1,0 +1,18 @@
+#!/bin/bash
+
+export ANGLE=$1
+CLOCK_ANGLE=`echo $ANGLE|perl -n -e 'print 360-$_;'`
+echo ANGLE=$ANGLE
+echo CLOCK_ANGLE=$CLOCK_ANGLE
+
+shift
+echo $*
+for i in $* ; do
+export TARGET=.thumbs/$i
+SOURCE=`echo $TARGET|perl -p -e 's/\.jpg/s.jpg/;'`
+echo SOURCE=$SOURCE
+echo TARGET=$TARGET
+
+mv $TARGET $SOURCE
+convert $SOURCE -rotate $CLOCK_ANGLE $TARGET
+done
