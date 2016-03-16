@@ -1,0 +1,11 @@
+#!/bin/bash
+
+exiftool -Orientation 20*-*-*/*.jpg *.jpg 2>/dev/null |grep -v Horizontal |grep -B1 Orientation
+exiftool -Orientation 20*-*-*/*.jpg *.jpg 2>/dev/null |grep -v Horizontal |grep -B1 Orientation |egrep -B1 'Rotate 90 CW'|perl -p -e 's/^=======+\s+(.+\.(jpg|png|gif))/\nrotate 270 $1\n/' |grep rotate|sh
+exiftool -Orientation 20*-*-*/*.jpg *.jpg 2>/dev/null |grep -v Horizontal |grep -B1 Orientation
+exiftool -Orientation 20*-*-*/*.jpg *.jpg 2>/dev/null |grep -v Horizontal |grep -B1 Orientation |egrep -B1 'Rotate 180 CW'|perl -p -e 's/^=======+\s+(.+\.(jpg|png|gif))/\nrotate 180 $1\n/' |grep rotate|sh
+exiftool -Orientation 20*-*-*/*.jpg *.jpg 2>/dev/null |grep -v Horizontal |grep -B1 Orientation
+exiftool -Orientation 20*-*-*/*.jpg *.jpg 2>/dev/null |grep -v Horizontal |grep -B1 Orientation |egrep -B1 'Rotate 270 CW'|perl -p -e 's/^=======+\s+(.+\.(jpg|png|gif))/\nrotate 90 $1\n/' |grep rotate|sh
+
+mkdir -p .ori
+mv *.jpg*ori* .ori 2>/dev/null
