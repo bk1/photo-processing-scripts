@@ -1,0 +1,133 @@
+#!/usr/bin/ruby
+
+require 'rubygems'
+require 'rmagick'
+
+def readImage(source)
+
+  img = nil
+  begin
+    img = Magick::Image.read(source).first
+  rescue Object => ex
+    msg = "ERROR source=#{source} ex=#{ex}"
+    $stderr.puts msg;
+    puts msg;
+    raise ex
+  end
+  if (img == nil) then
+    ex = "img is nil for source=#{source}"
+    msg = "ERROR #{msg}"
+    $stderr.puts msg
+    puts msg
+    raise ex
+  end
+  img
+end
+
+def obtainSize(source)
+  img = readImage(source)
+
+  width = img.columns
+  height = img.rows
+  puts "S=#{width}x#{height}"
+  return [width, height]
+end
+
+def createScaledCopy(source, target, wanted_width, wanted_height, exactness)
+  new_width = 0;
+  new_height = 0;
+  img = readImage(source)
+  width = img.columns
+  height = img.rows
+  if (exactness == :exact)
+      new_width = wanted_width;
+      new_height = wanted_height;
+  else
+    min_width = 40
+    min_height = 40
+    total_wanted  = wanted_width + wanted_height
+    puts "S=#{width}x#{height}"
+    total_found = width + height
+    if (total_found >= total_wanted)
+      factor = total_wanted.to_f / total_found
+      new_width  = [min_width, (width * factor).to_i].max
+      new_height = [min_height, (height * factor).to_i].max
+    else
+      # puts "width=#{width} height=#{height}: too small to scale"
+      return
+    end
+  end
+  scaled_copy = img.scale(new_width, new_height)
+  puts "scaling #{source} from #{width}, #{height} to #{new_width}, #{new_height}"
+  scaled_copy.write(target)
+end
+
+#------------------------------------------------------------
+
+measure_only = ARGV[0] == '-s'
+if (measure_only)
+    ARGV.shift
+end
+
+exact_sizes = ARGV[0] == '-e'
+if (exact_sizes)
+  ARGV.shift
+  unless (ARGV[2] && ARGV[3])
+    raise "sizes must be given";
+  end
+end
+
+width_only = ARGV[0] == '-w'
+height_only = ARGV[0] == '-h'
+if (width_only)
+  ARGV.shift
+  exact_sizes = true
+  unless (ARGV[2])
+    raise "width must be given";
+  end
+  if (ARGV[3])
+    raise "height must not be given";
+  end
+elsif (height_only)
+  ARGV.shift
+  exact_sizes = true
+  unless (ARGV[2])
+    raise "height must be given";
+  end
+  if (ARGV[3])
+    raise "widthmust not be given";
+  end
+end
+
+source = ARGV[0].strip
+target=  ARGV[1].strip
+wanted_width = 256
+wanted_height = 256
+
+if (width_only) then
+  wanted_width = ARGV[2].strip.to_i
+  w, h = obtainSize(source)
+  wanted_height = (wanted_width * h + (w/2)) / w
+elsif (height_only) then
+  wanted_height = ARGV[2].strip.to_i
+  w, h = obtainSize(source)
+  wanted_width = (wanted_height * w + (h/2)) / h
+else
+  if (ARGV[2]) then
+    wanted_width = ARGV[2].strip.to_i
+  end
+  if (ARGV[3]) then
+    wanted_height = ARGV[3].strip.to_i
+  end
+end
+
+# puts "-> #{wanted_width}x#{wanted_height}"
+# exit 0
+
+if (measure_only)
+  obtainSize(source)
+elsif (exact_sizes)
+  createScaledCopy(source, target, wanted_width, wanted_height, :exact)
+else
+  createScaledCopy(source, target, wanted_width, wanted_height, :approx)
+end

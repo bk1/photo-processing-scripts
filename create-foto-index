@@ -1,0 +1,392 @@
+#!/usr/bin/perl -w
+# //COMMENT{-*- coding: utf-8 -*- Юникод/UTF-8}
+use strict;
+use File::Find ();
+use utf8;
+
+# Set the variable $File::Find::dont_use_nlink if you're using AFS,
+# since AFS cheats.
+
+# for the convenience of &wanted calls, including -eval statements:
+use vars qw/*name *dir *prune/;
+*name     = *File::Find::name;
+*dir      = *File::Find::dir;
+*prune    = *File::Find::prune;
+
+my %successors = ();
+my %predecessors = ();
+
+sub wanted;
+
+use Cwd ();
+my $cwd = Cwd::cwd();
+
+my $ruby_version = $ENV{RUBY_VERSION};
+
+unless (defined $ruby_version) {
+    die "must be running in rvm\n";
+}
+
+unless ($ruby_version ge '2.2') {
+    die "must be running with Ruby > 2.2 configured\n";
+}
+
+# Traverse desired filesystems
+File::Find::find({wanted => \&wanted}, '.');
+
+print "\n";
+flush STDOUT;
+
+exit 0;
+
+
+sub wanted {
+    my $linux_pwd = `pwd`;
+    # print "\$_=$_ \$name=$name pwd=$linux_pwd";
+    my ($dev,$ino,$mode,$nlink,$uid,$gid);
+
+    (($dev,$ino,$mode,$nlink,$uid,$gid) = lstat($_))
+        && -d _
+        && -x _
+        && -r _
+        && ! m/\.(thumbs|ori|xvpics|grafik)/
+        && ! m/^RCS$/
+        && process($name);
+}
+
+
+sub process($) {
+
+    my $name = shift;
+    my $linux_pwd = `pwd`;
+    $linux_pwd =~ s/\s//g;
+    # print "accepted: _=$_ name=$name cwd=$cwd pwd=$linux_pwd\n";
+
+    my $r    = "-";
+
+    chdir $cwd; #sigh
+    $r = opendir DIR, $name;
+    unless ($r) {
+        unless (defined $r) {
+            $r = "--";
+        }
+        my $message = "\ncould not open dir ";
+        $message .= $name;
+        $message .= "(r=";
+        $message .= $r;
+        $message .= " m=$! pwd=$ENV{PWD})";
+        die $message;
+    }
+    unless (-d "$name/.thumbs") {
+        mkdir "$name/.thumbs";
+    }
+    my $index_path = $name . "/index.html";
+    my $indexf_path = $name . "/indexf.html";
+    my $rel_dir = $name;
+    $rel_dir =~ s@^\./@@;
+    my $abs_dir = $ENV{PWD};
+    unless (defined $predecessors{$abs_dir} || defined $successors{$abs_dir}) {
+        my $parent_dir = $abs_dir;
+        $parent_dir =~ s/(.+)\/.+/$1/;
+        if (-d $parent_dir && $parent_dir ne $abs_dir && -f "$parent_dir/index.html") {
+            opendir PARENT_DIR, $parent_dir;
+            my @sibling_dirs = sort readdir PARENT_DIR;
+            close PARENT_DIR;
+            my $prev_abs_sibling_dir;
+            for my $rel_sibling_dir (@sibling_dirs) {
+                my $abs_sibling_dir = "$parent_dir/$rel_sibling_dir";
+                if (-d $abs_sibling_dir && -f "$abs_sibling_dir/index.html") {
+                    if (defined $prev_abs_sibling_dir) {
+                        $successors{$prev_abs_sibling_dir} = $abs_sibling_dir;
+                        $predecessors{$abs_sibling_dir} = $prev_abs_sibling_dir;
+                        # print "$prev_abs_sibling_dir ... $abs_sibling_dir\n";
+                    }
+                    $prev_abs_sibling_dir = $abs_sibling_dir;
+                }
+            }
+        }
+    }
+
+    if ($rel_dir ne "." && $rel_dir ne "") {
+        $abs_dir .= ("/" . $rel_dir);
+    }
+    # print "name=$name index_path=$index_path\n";
+
+    my @files = sort readdir DIR;
+    ($r = closedir DIR) || die "\ncould not close dir $name (r=$r)";
+    # print $name,":: (", $ENV{PWD}, ") n=", scalar(@files), "\n";
+
+    my $file;
+    my $path;
+    my ($dev,$ino,$mode,$nlink,$uid,$gid,$rdev,$size,$atime,$mtime,$ctime,$blksize,$blocks);
+    my @images = ();
+    my %images = ();
+    my @sub_dirs = ();
+    my @pages = ();
+    my %links = ();
+    my %medium_scaled = ();
+    my %master = ();
+    my %format = ();
+    if (-f $index_path) {
+        my $is_open = open INDEXR, "<$index_path";
+        if ($is_open) {
+            while (<INDEXR>) {
+                if (m/\d+:\s+(\S+)\s+(\d+x\d+)/) {
+                    my $entry = $1;
+                    my $f = $2;
+                    $format{$entry} = $f;
+                }
+            }
+            close INDEXR;
+        }
+    }
+    foreach $file ( @files ) {
+        if ($file =~ m/^\./)  {
+            next;
+        }
+        $path = $name . "/" . $file;
+        ($dev,$ino,$mode,$nlink,$uid,$gid,$rdev,$size,$atime,$mtime,$ctime,$blksize,$blocks) = lstat($path);
+        my $is_file = -f _;
+        my $is_dir  = -d _;
+        if ($file =~ m/^[^.]/
+            && $file =~ m/\.(jpg|png|gif|svg)$/
+            && $is_file) {
+            push @images, $file;
+            $images{$file} = 1;
+            # print "p=$path f=$file s=$size\n";
+        } elsif ($file =~ m/^[^.]/ && $file =~ m/\.html$/ && $is_file) {
+            push @pages, $file;
+        } elsif ($file =~ m/^([A-Z]+)$/ && $is_file) {
+            open LINK_FILE, "<:utf8", $path;
+            my $link_url = "";
+            while (my $l = <LINK_FILE>) {
+                $link_url .= $l;
+            }
+            close LINK_FILE;
+            $link_url =~ s/\s//g;
+            $links{$file} = $link_url;
+            print "$file->$link_url\n";
+            flush STDOUT;
+        } elsif ($is_dir) {
+            push @sub_dirs, $file;
+        }
+    }
+    foreach $file ( @images ) {
+        if ($file =~ /^\d+px-(?<master>.+)$/) {
+            my $master = $+{master};
+            if ($images{$master}) {
+                $medium_scaled{$master} //= [];
+                push @{$medium_scaled{$master}}, $file;
+                $master{$file} = $master;
+            }
+        }
+    }
+    if (-f $index_path) {
+        unlink $index_path;
+    }
+    my $is_open  = open INDEX,  ">:utf8", $index_path;
+    my $isf_open = open INDEXF, ">:utf8", $indexf_path;
+    if (! $is_open || ! $isf_open) {
+        my $msg = "could not open $index_path\n";
+        print $msg;
+        print STDERR $msg;
+        flush STDOUT;
+        return;
+    }
+    my $counter=1;
+    my $head_of_index = <<"EOH";
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html><!-- //COMMENT{-*- coding: utf-8 -*- Юникод/UTF-8} -->
+<head>
+<title>Index of $name</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<meta http-equiv="Content-Language" content="de">
+<meta name="GENERATOR" content="$0">
+<meta name="AUTHOR" content="Karl Brodowsky">
+<style>
+dl.meImgLeft { float: left; margin-right: 1em; border-width: 2px; }
+// verhindert das Einrücken und
+// den Abstand nach oben
+dl.meImgLeft dt { margin-bottom: 0; }
+dl.meImgLeft dd { margin: 0; }
+div.img { width: 30%; float: left; border-width: 2px; border-style: solid; border-color: #aaaaff; background-color: #ccccff; }
+div.buttons { width: 100%; float: left; border-width: 2px; border-style: solid; border-color: #ffaaff; background-color: #ffccff; }
+</style>
+</head>
+<body>
+<ol>
+EOH
+my $top_links = <<"EOTL";
+<li><a href="../index.html">up</a>
+<li><a href="index.html">index.html</a>
+<li><a href="indexf.html">indexf.html</a>
+EOTL
+    my $prev = $predecessors{$abs_dir};
+    if (defined $prev) {
+        $top_links .= "<li><a href=\"$prev/index.html\">prev</a>\n";
+    }
+    my $next = $successors{$abs_dir};
+    if (defined $next) {
+        $top_links .= "<li><a href=\"$next/index.html\">next</a>\n";
+    }
+    foreach my $key (sort keys %links) {
+        my $url = $links{$key};
+        $top_links .= "<li><a href=\"$url\">$key</a>\n";
+    }
+    $head_of_index .= $top_links;
+
+    print INDEX $head_of_index;
+    print INDEXF $head_of_index;
+    print INDEXF <<"EOH2";
+<li>index_path=$index_path
+<li>PWD=$ENV{PWD}
+<li>rel_dir=$rel_dir
+<li>abs_dir=$abs_dir
+EOH2
+
+    my $entry;
+    my $prev_entry;
+    for $entry (sort @sub_dirs) {
+        printf INDEX "<li><a href=\"%s/index.html\">%s</a>\n", $entry, $entry;
+        if (defined $prev_entry) {
+            my $abs_prev_dir = "$abs_dir/$prev_entry";
+            my $abs_curr_dir = "$abs_dir/$entry";
+            $successors{$abs_prev_dir} = $abs_curr_dir;
+            $predecessors{$abs_curr_dir} = $abs_prev_dir;
+            # print "$abs_prev_dir ... $abs_curr_dir\n";
+        }
+        $prev_entry = $entry;
+    }
+    for $entry (sort @pages) {
+        unless ($entry =~ m/^indexf?\.html/) {
+            printf INDEX "<li><a href=\"%s\">%s</a>\n", $entry, $entry;
+        }
+    }
+    print INDEX<<"EOM";
+</ol>
+EOM
+    print INDEXF "</ol>\n";
+    print INDEXF "<form method=\"POST\" action=\"http://localhost/cgi-bin/mark-images.cgi\">\n";
+    print INDEXF "<input type=\"hidden\" id=\"DIR\" name=\"DIR\" value=\"$abs_dir\">\n";
+    print INDEXF "<div>\n";
+    print INDEX "<div>\n";
+    print INDEX "<dl>\n";
+    my $image_id = 0;
+    my $tabindex_t = 1;
+    my $tabindex_c = 1001;
+    for $entry (sort @images) {
+        if ($master{$entry}) {
+            unlink ".thumbs/$entry";
+            next;
+        }
+        my $image = $entry;
+        my $thumb = ".thumbs/$entry";
+        $thumb =~ s/\.svg$/.png/;
+        my $image_path =  "$name/$image";
+        my $thumb_path = "$name/$thumb";
+        if ((-f $thumb_path) && (stat $thumb_path)[9] >= (stat $image_path)[9]) {
+            unless ($format{$entry}) {
+                my $size_output = `ruby /home/bk1/bin/generell/scale-image -s $image_path $thumb_path`;
+                chomp ($size_output);
+                if ($size_output =~ m/S=(?<SIZE>\d+x\d+)\s*$/) {
+                    my $size = $+{SIZE};
+                    $format{$entry} = $size;
+                    $size_output =~ s/S=(\d+x\d+)\n//;
+                    print "(found size $size): $entry\n", $size_output;
+                    flush STDOUT;
+                } else {
+                    print "no size for $entry: $size_output\n";
+                    flush STDOUT;
+                    next;
+                }
+            }
+        } else {
+            if ($thumb_path =~ m/\s/ || $image_path =~ m/\s/) {
+                system "ruby", "/home/bk1/bin/generell/scale-image", $image_path, $thumb_path;
+            } else {
+                my $scaling_output = `ruby /home/bk1/bin/generell/scale-image $image_path $thumb_path`;
+                if ($scaling_output =~ m/S=(?<SIZE>\d+x\d+)\n/) {
+                    my $size = $+{SIZE};
+                    $format{$entry} = $size;
+                    $scaling_output =~ s/S=(\d+x\d+)\n//;
+                    print "(with scale $size): $entry\n", $scaling_output;
+                    flush STDOUT;
+                } else {
+                    print "(with scale no format): $entry\n", $scaling_output;
+                    flush STDOUT;
+                }
+            }
+            if (-f $thumb_path) {
+                printf("scaled $image_path -> $thumb_path\n");
+                flush STDOUT;
+            } else {
+                # already small enough
+                system "ln -s -f ../$image $thumb_path";
+                system "ls -l $thumb_path";
+                $thumb_path = $image_path;
+                $thumb = $image;
+                flush STDOUT;
+            }
+        }
+        my $image_html_entry = "";
+        $image_html_entry .= sprintf "<dl class=\"meImgLeft\"><dt><a href=\"%s\"><img src=\"%s\"></a>", $image, $thumb;
+        if ($medium_scaled{$entry}) {
+            my $medium;
+            for $medium (sort @{$medium_scaled{$entry}}) {
+                $medium =~ m/^(?<size>\d+px)/;
+                my $size = $+{size};
+                $image_html_entry .= sprintf "&nbsp;<a href=\"%s\">%s</a>", $medium, $size;
+            }
+        }
+        my $txt;
+        my $f = $format{$entry};
+        if ($f) {
+            $txt = sprintf "%3d: %s %s", $counter, $entry, $f;
+        } else {
+            $txt = sprintf "%3d: %s", $counter, $entry;
+        }
+        $counter++;
+        $image_html_entry .= sprintf "</dt><dd><small>%s</small></dd></dl>\n", $txt;
+        print INDEX $image_html_entry;
+        print INDEXF "<div class=\"img\">\n";
+        $image_html_entry =~ s@</?dl[^<>]*>@@g;
+        $image_html_entry =~ s@</dt>@<br>@g;
+        $image_html_entry =~ s@</?d[dt]>@@g;
+        print INDEXF $image_html_entry;
+        print INDEXF "<input type=\"hidden\" name=\"I$image_id\" value=\"$image\">\n";
+
+        print INDEXF "<input type=\"checkbox\" tabindex=\"$tabindex_c\" name=\"C$image_id\"><br>\n";
+        print INDEXF "<input type=\"text\" tabindex=\"$tabindex_t\" name=\"T$image_id\" size=\"50\" maxlength=\"256\">\n";
+        print INDEXF "</div>\n";
+        $image_id++;
+        $tabindex_c++;
+        $tabindex_t++;
+    }
+
+    print INDEXF "</div>\n";
+    print INDEXF "<input type=\"hidden\" name=\"COUNT\" id=\"COUNT\" value=\"$image_id\">\n";
+    print INDEXF "<div class=\"buttons\"><p><input type=\"submit\" value=\"OK\">\n";
+    print INDEXF "<input type=\"reset\" value=\"RESET\">\n</div>\n";
+    print INDEXF "</form>\n";
+    print INDEX "</dl>\n";
+    print INDEX "</div>\n";
+
+    my $footer = <<"EOF";
+<br clear="all">
+<ol>
+$top_links
+</ol>
+</body>
+</html>
+EOF
+    print INDEX $footer;
+    print INDEXF $footer;
+
+    close INDEX;
+    close INDEXF;
+
+    chdir $File::Find::dir;
+
+    return 0;
+}
+
